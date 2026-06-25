@@ -4,6 +4,7 @@ const sharp = require('sharp');
 const compression = require('compression');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -123,6 +124,202 @@ app.delete('/api/photos/:filename', (req, res) => {
   if (fs.existsSync(thumbpath)) fs.unlinkSync(thumbpath);
   res.json({ success: true });
 });
+
+// ──────────────────────────────────────
+// Live Slideshow Feature
+// ──────────────────────────────────────
+
+// Active slideshow sessions: { id: { photos, currentIndex, interval, speed, playing, clients: Set } }
+const slideshowSessions = new Map();
+
+// Create a new live slideshow session
+app.post('/api/slideshow', express.json(), (req, res) => {
+  const { speed = 5000, shuffle = false } = req.body || {};
+  const id = crypto.randomBytes(4).toString('hex');
+
+  // Get photos list
+  const files = fs.readdirSync(uploadsDir)
+    .filter(file => /\.(jpg|jpeg|png|gif|webp)$/i.test(file))
+    .map(file => {
+      const stats = fs.statSync(path.join(uploadsDir, file));
+      return {
+        filename: file,
+        url: `/uploads/${file}`,
+        thumb: `/uploads/thumbs/${file}`,
+        uploadedAt: stats.mtime
+      };
+    })
+    .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
+  if (files.length === 0) {
+    return res.status(400).json({ error: 'No photos available for slideshow' });
+  }
+
+  let photoList = [...files];
+  if (shuffle) {
+    for (let i = photoList.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [photoList[i], photoList[j]] = [photoList[j], photoList[i]];
+    }
+  }
+
+  const session = {
+    id,
+    photos: photoList,
+    currentIndex: 0,
+    speed,
+    playing: true,
+    clients: new Set(),
+    interval: null
+  };
+
+  slideshowSessions.set(id, session);
+  startSlideshowTimer(session);
+
+  res.json({ id, totalPhotos: photoList.length, speed });
+});
+
+// Get slideshow session info
+app.get('/api/slideshow/:id', (req, res) => {
+  const session = slideshowSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Slideshow not found' });
+
+  res.json({
+    id: session.id,
+    totalPhotos: session.photos.length,
+    currentIndex: session.currentIndex,
+    currentPhoto: session.photos[session.currentIndex],
+    speed: session.speed,
+    playing: session.playing,
+    viewers: session.clients.size
+  });
+});
+
+// SSE endpoint — clients connect here to receive live updates
+app.get('/api/slideshow/:id/live', (req, res) => {
+  const session = slideshowSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Slideshow not found' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
+  // Send current state immediately
+  const currentState = {
+    type: 'sync',
+    currentIndex: session.currentIndex,
+    photo: session.photos[session.currentIndex],
+    playing: session.playing,
+    speed: session.speed,
+    totalPhotos: session.photos.length,
+    viewers: session.clients.size + 1
+  };
+  res.write(`data: ${JSON.stringify(currentState)}\n\n`);
+
+  session.clients.add(res);
+  broadcastViewerCount(session);
+
+  req.on('close', () => {
+    session.clients.delete(res);
+    broadcastViewerCount(session);
+    // Auto-cleanup empty sessions after 60s
+    if (session.clients.size === 0) {
+      setTimeout(() => {
+        if (session.clients.size === 0 && slideshowSessions.has(session.id)) {
+          clearInterval(session.interval);
+          slideshowSessions.delete(session.id);
+        }
+      }, 60000);
+    }
+  });
+});
+
+// Control slideshow (play, pause, next, prev, speed)
+app.post('/api/slideshow/:id/control', express.json(), (req, res) => {
+  const session = slideshowSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Slideshow not found' });
+
+  const { action, speed } = req.body;
+
+  switch (action) {
+    case 'play':
+      session.playing = true;
+      startSlideshowTimer(session);
+      break;
+    case 'pause':
+      session.playing = false;
+      clearInterval(session.interval);
+      session.interval = null;
+      break;
+    case 'next':
+      session.currentIndex = (session.currentIndex + 1) % session.photos.length;
+      break;
+    case 'prev':
+      session.currentIndex = (session.currentIndex - 1 + session.photos.length) % session.photos.length;
+      break;
+    case 'speed':
+      if (speed && speed >= 1000 && speed <= 30000) {
+        session.speed = speed;
+        if (session.playing) {
+          clearInterval(session.interval);
+          startSlideshowTimer(session);
+        }
+      }
+      break;
+  }
+
+  broadcastState(session);
+  res.json({ success: true });
+});
+
+// Delete a slideshow session
+app.delete('/api/slideshow/:id', (req, res) => {
+  const session = slideshowSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Slideshow not found' });
+
+  clearInterval(session.interval);
+  // Notify clients the session ended
+  for (const client of session.clients) {
+    client.write(`data: ${JSON.stringify({ type: 'ended' })}\n\n`);
+    client.end();
+  }
+  slideshowSessions.delete(req.params.id);
+  res.json({ success: true });
+});
+
+function startSlideshowTimer(session) {
+  if (session.interval) clearInterval(session.interval);
+  session.interval = setInterval(() => {
+    session.currentIndex = (session.currentIndex + 1) % session.photos.length;
+    broadcastState(session);
+  }, session.speed);
+}
+
+function broadcastState(session) {
+  const data = {
+    type: 'update',
+    currentIndex: session.currentIndex,
+    photo: session.photos[session.currentIndex],
+    playing: session.playing,
+    speed: session.speed,
+    viewers: session.clients.size
+  };
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  for (const client of session.clients) {
+    client.write(message);
+  }
+}
+
+function broadcastViewerCount(session) {
+  const data = { type: 'viewers', viewers: session.clients.size };
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+  for (const client of session.clients) {
+    client.write(message);
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`Photo Album running at http://localhost:${PORT}`);

@@ -21,8 +21,7 @@ let selectedFiles = [];
 let photos = [];
 let currentPhotoIndex = 0;
 
-// Initialize
-document.addEventListener('DOMContentLoaded', loadPhotos);
+// Initialize — handled in slideshow section below
 
 // Modal controls
 uploadBtn.addEventListener('click', () => {
@@ -238,8 +237,9 @@ lightboxNext.addEventListener('click', (e) => {
   lightboxImg.src = photos[currentPhotoIndex].url;
 });
 
-// Keyboard navigation
+// Keyboard navigation (lightbox only)
 document.addEventListener('keydown', (e) => {
+  if (slideshow && slideshow.classList.contains('active')) return; // Let slideshow handle it
   if (!lightbox.classList.contains('active')) return;
   if (e.key === 'Escape') closeLightbox();
   if (e.key === 'ArrowLeft') lightboxPrev.click();
@@ -277,4 +277,303 @@ function showToast(message) {
   document.body.appendChild(toast);
 
   setTimeout(() => toast.remove(), 3000);
+}
+
+// ──────────────────────────────────────
+// Live Slideshow
+// ──────────────────────────────────────
+
+const slideshow = document.getElementById('slideshow');
+const slideshowBtn = document.getElementById('slideshowBtn');
+const slideshowExit = document.getElementById('slideshowExit');
+const slideshowImg1 = document.getElementById('slideshowImg1');
+const slideshowImg2 = document.getElementById('slideshowImg2');
+const slideshowPlayPause = document.getElementById('slideshowPlayPause');
+const slideshowPrevBtn = document.getElementById('slideshowPrev');
+const slideshowNextBtn = document.getElementById('slideshowNext');
+const slideshowCounter = document.getElementById('slideshowCounter');
+const slideshowViewers = document.getElementById('slideshowViewers');
+const viewerCount = document.getElementById('viewerCount');
+const speedSlider = document.getElementById('speedSlider');
+const speedLabel = document.getElementById('speedLabel');
+const slideshowShare = document.getElementById('slideshowShare');
+const slideshowProgressFill = document.getElementById('slideshowProgressFill');
+
+let slideshowSessionId = null;
+let slideshowEventSource = null;
+let slideshowPlaying = false;
+let slideshowCurrentImg = 1; // Which img element is currently visible
+let progressAnimation = null;
+let autoHideTimer = null;
+
+// Check URL for shared slideshow
+function checkForSharedSlideshow() {
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get('slideshow');
+  if (sessionId) {
+    joinSlideshow(sessionId);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadPhotos();
+  checkForSharedSlideshow();
+});
+
+// Start a new slideshow
+slideshowBtn.addEventListener('click', async () => {
+  if (photos.length === 0) {
+    showToast('Upload some photos first!');
+    return;
+  }
+
+  try {
+    const speed = speedSlider.value * 1000;
+    const response = await fetch('/api/slideshow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speed })
+    });
+    const data = await response.json();
+
+    if (data.error) {
+      showToast(data.error);
+      return;
+    }
+
+    slideshowSessionId = data.id;
+    connectToSlideshow(data.id);
+    openSlideshow();
+  } catch (err) {
+    showToast('Failed to start slideshow');
+  }
+});
+
+// Join an existing slideshow
+async function joinSlideshow(sessionId) {
+  try {
+    const response = await fetch(`/api/slideshow/${sessionId}`);
+    if (!response.ok) {
+      showToast('Slideshow not found or ended');
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    slideshowSessionId = sessionId;
+    connectToSlideshow(sessionId);
+    openSlideshow();
+  } catch (err) {
+    showToast('Failed to join slideshow');
+  }
+}
+
+// Connect to the live SSE stream
+function connectToSlideshow(sessionId) {
+  if (slideshowEventSource) {
+    slideshowEventSource.close();
+  }
+
+  slideshowEventSource = new EventSource(`/api/slideshow/${sessionId}/live`);
+
+  slideshowEventSource.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+
+    switch (data.type) {
+      case 'sync':
+      case 'update':
+        updateSlideshowDisplay(data);
+        break;
+      case 'viewers':
+        viewerCount.textContent = data.viewers;
+        break;
+      case 'ended':
+        showToast('Slideshow ended');
+        closeSlideshow();
+        break;
+    }
+  });
+
+  slideshowEventSource.addEventListener('error', () => {
+    // Will auto-reconnect
+  });
+}
+
+function updateSlideshowDisplay(data) {
+  const { photo, currentIndex, playing, speed, totalPhotos, viewers } = data;
+
+  // Crossfade between two img elements
+  const activeImg = slideshowCurrentImg === 1 ? slideshowImg1 : slideshowImg2;
+  const inactiveImg = slideshowCurrentImg === 1 ? slideshowImg2 : slideshowImg1;
+
+  inactiveImg.src = photo.url;
+  // Small delay for the src to load before transitioning
+  inactiveImg.onload = () => {
+    activeImg.classList.remove('slideshow-img-active');
+    inactiveImg.classList.add('slideshow-img-active');
+    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
+  };
+  // Fallback if already cached
+  if (inactiveImg.complete && inactiveImg.src.includes(photo.url)) {
+    activeImg.classList.remove('slideshow-img-active');
+    inactiveImg.classList.add('slideshow-img-active');
+    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
+  }
+
+  slideshowCounter.textContent = `${currentIndex + 1} / ${totalPhotos || photos.length}`;
+
+  if (viewers !== undefined) {
+    viewerCount.textContent = viewers;
+  }
+
+  slideshowPlaying = playing;
+  if (playing) {
+    slideshow.classList.add('playing');
+    startProgressBar(speed);
+  } else {
+    slideshow.classList.remove('playing');
+    stopProgressBar();
+  }
+
+  if (speed) {
+    const seconds = Math.round(speed / 1000);
+    speedSlider.value = seconds;
+    speedLabel.textContent = seconds + 's';
+  }
+}
+
+function openSlideshow() {
+  slideshow.classList.add('active');
+  document.body.style.overflow = 'hidden';
+  setupAutoHide();
+}
+
+function closeSlideshow() {
+  slideshow.classList.remove('active');
+  slideshow.classList.remove('playing');
+  document.body.style.overflow = '';
+
+  if (slideshowEventSource) {
+    slideshowEventSource.close();
+    slideshowEventSource = null;
+  }
+
+  stopProgressBar();
+  clearTimeout(autoHideTimer);
+
+  // Clean URL
+  window.history.replaceState({}, '', window.location.pathname);
+  slideshowSessionId = null;
+}
+
+// Controls
+slideshowExit.addEventListener('click', async () => {
+  if (slideshowSessionId) {
+    try {
+      await fetch(`/api/slideshow/${slideshowSessionId}`, { method: 'DELETE' });
+    } catch (e) { /* ignore */ }
+  }
+  closeSlideshow();
+});
+
+slideshowPlayPause.addEventListener('click', () => {
+  if (!slideshowSessionId) return;
+  const action = slideshowPlaying ? 'pause' : 'play';
+  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action })
+  });
+});
+
+slideshowPrevBtn.addEventListener('click', () => {
+  if (!slideshowSessionId) return;
+  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'prev' })
+  });
+});
+
+slideshowNextBtn.addEventListener('click', () => {
+  if (!slideshowSessionId) return;
+  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'next' })
+  });
+});
+
+speedSlider.addEventListener('input', () => {
+  speedLabel.textContent = speedSlider.value + 's';
+});
+
+speedSlider.addEventListener('change', () => {
+  if (!slideshowSessionId) return;
+  const speed = speedSlider.value * 1000;
+  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'speed', speed })
+  });
+});
+
+slideshowShare.addEventListener('click', () => {
+  if (!slideshowSessionId) return;
+  const url = `${window.location.origin}?slideshow=${slideshowSessionId}`;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Link copied! Share it so others can watch live.');
+    // Also update URL
+    window.history.replaceState({}, '', `?slideshow=${slideshowSessionId}`);
+  }).catch(() => {
+    // Fallback
+    prompt('Share this link:', url);
+  });
+});
+
+// Keyboard controls in slideshow
+document.addEventListener('keydown', (e) => {
+  if (!slideshow.classList.contains('active')) return;
+  if (e.key === 'Escape') { slideshowExit.click(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') slideshowPrevBtn.click();
+  if (e.key === 'ArrowRight') slideshowNextBtn.click();
+  if (e.key === ' ') { slideshowPlayPause.click(); e.preventDefault(); }
+});
+
+// Progress bar animation
+function startProgressBar(duration) {
+  stopProgressBar();
+  slideshowProgressFill.style.transition = 'none';
+  slideshowProgressFill.style.width = '0%';
+
+  // Force reflow
+  slideshowProgressFill.offsetHeight;
+
+  slideshowProgressFill.style.transition = `width ${duration}ms linear`;
+  slideshowProgressFill.style.width = '100%';
+}
+
+function stopProgressBar() {
+  slideshowProgressFill.style.transition = 'none';
+  slideshowProgressFill.style.width = '0%';
+}
+
+// Auto-hide overlay after inactivity
+function setupAutoHide() {
+  const overlay = document.querySelector('.slideshow-overlay');
+
+  slideshow.addEventListener('mousemove', resetAutoHide);
+  slideshow.addEventListener('touchstart', resetAutoHide);
+
+  function resetAutoHide() {
+    overlay.classList.remove('auto-hide');
+    clearTimeout(autoHideTimer);
+    autoHideTimer = setTimeout(() => {
+      if (slideshowPlaying) {
+        overlay.classList.add('auto-hide');
+      }
+    }, 3000);
+  }
+
+  resetAutoHide();
 }
