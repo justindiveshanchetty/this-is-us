@@ -289,21 +289,11 @@ const slideshowBtn = document.getElementById('slideshowBtn');
 const slideshowExit = document.getElementById('slideshowExit');
 const slideshowImg1 = document.getElementById('slideshowImg1');
 const slideshowImg2 = document.getElementById('slideshowImg2');
-const slideshowPlayPause = document.getElementById('slideshowPlayPause');
-const slideshowPrevBtn = document.getElementById('slideshowPrev');
-const slideshowNextBtn = document.getElementById('slideshowNext');
-const slideshowCounter = document.getElementById('slideshowCounter');
-const speedSlider = document.getElementById('speedSlider');
-const speedLabel = document.getElementById('speedLabel');
-const slideshowProgressFill = document.getElementById('slideshowProgressFill');
 
 let slideshowIndex = 0;
-let slideshowPlaying = false;
 let slideshowTimer = null;
 let slideshowCurrentImg = 1;
-let autoHideTimer = null;
 
-// Start slideshow
 slideshowBtn.addEventListener('click', () => {
   if (photos.length === 0) {
     showToast('Upload some photos first!');
@@ -317,67 +307,18 @@ function openSlideshow() {
   slideshow.classList.add('active');
   document.body.style.overflow = 'hidden';
 
-  // Show first photo
   slideshowImg1.src = photos[0].url;
   slideshowImg1.classList.add('slideshow-img-active');
   slideshowImg2.classList.remove('slideshow-img-active');
   slideshowCurrentImg = 1;
-  updateCounter();
 
-  // Auto-play
-  startPlaying();
-  setupAutoHide();
-}
-
-function closeSlideshow() {
-  slideshow.classList.remove('active');
-  slideshow.classList.remove('playing');
-  document.body.style.overflow = '';
-  stopPlaying();
-  clearTimeout(autoHideTimer);
-}
-
-function startPlaying() {
-  slideshowPlaying = true;
-  slideshow.classList.add('playing');
-  resetTimer();
-}
-
-function stopPlaying() {
-  slideshowPlaying = false;
-  slideshow.classList.remove('playing');
-  clearInterval(slideshowTimer);
-  slideshowTimer = null;
-  stopProgressBar();
-}
-
-function resetTimer() {
-  clearInterval(slideshowTimer);
-  const speed = speedSlider.value * 1000;
-  startProgressBar(speed);
   slideshowTimer = setInterval(() => {
-    goToNext();
-  }, speed);
+    slideshowIndex = (slideshowIndex + 1) % photos.length;
+    showNextPhoto();
+  }, 5000);
 }
 
-function goToNext() {
-  slideshowIndex = (slideshowIndex + 1) % photos.length;
-  showCurrentPhoto();
-  if (slideshowPlaying) {
-    const speed = speedSlider.value * 1000;
-    startProgressBar(speed);
-  }
-}
-
-function goToPrev() {
-  slideshowIndex = (slideshowIndex - 1 + photos.length) % photos.length;
-  showCurrentPhoto();
-  if (slideshowPlaying) {
-    resetTimer();
-  }
-}
-
-function showCurrentPhoto() {
+function showNextPhoto() {
   const photo = photos[slideshowIndex];
   const activeImg = slideshowCurrentImg === 1 ? slideshowImg1 : slideshowImg2;
   const inactiveImg = slideshowCurrentImg === 1 ? slideshowImg2 : slideshowImg1;
@@ -388,85 +329,23 @@ function showCurrentPhoto() {
     inactiveImg.classList.add('slideshow-img-active');
     slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
   };
-  // If already cached
   if (inactiveImg.complete) {
     activeImg.classList.remove('slideshow-img-active');
     inactiveImg.classList.add('slideshow-img-active');
     slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
   }
-
-  updateCounter();
 }
 
-function updateCounter() {
-  slideshowCounter.textContent = `${slideshowIndex + 1} / ${photos.length}`;
+function closeSlideshow() {
+  slideshow.classList.remove('active');
+  document.body.style.overflow = '';
+  clearInterval(slideshowTimer);
+  slideshowTimer = null;
 }
 
-// Controls
 slideshowExit.addEventListener('click', closeSlideshow);
 
-slideshowPlayPause.addEventListener('click', () => {
-  if (slideshowPlaying) {
-    stopPlaying();
-  } else {
-    startPlaying();
-  }
-});
-
-slideshowPrevBtn.addEventListener('click', goToPrev);
-slideshowNextBtn.addEventListener('click', goToNext);
-
-speedSlider.addEventListener('input', () => {
-  speedLabel.textContent = speedSlider.value + 's';
-});
-
-speedSlider.addEventListener('change', () => {
-  if (slideshowPlaying) {
-    resetTimer();
-  }
-});
-
-// Keyboard controls in slideshow
 document.addEventListener('keydown', (e) => {
   if (!slideshow.classList.contains('active')) return;
-  if (e.key === 'Escape') { closeSlideshow(); e.preventDefault(); }
-  if (e.key === 'ArrowLeft') goToPrev();
-  if (e.key === 'ArrowRight') goToNext();
-  if (e.key === ' ') { slideshowPlayPause.click(); e.preventDefault(); }
+  if (e.key === 'Escape') closeSlideshow();
 });
-
-// Progress bar
-function startProgressBar(duration) {
-  stopProgressBar();
-  slideshowProgressFill.style.transition = 'none';
-  slideshowProgressFill.style.width = '0%';
-  // Force reflow
-  slideshowProgressFill.offsetHeight;
-  slideshowProgressFill.style.transition = `width ${duration}ms linear`;
-  slideshowProgressFill.style.width = '100%';
-}
-
-function stopProgressBar() {
-  slideshowProgressFill.style.transition = 'none';
-  slideshowProgressFill.style.width = '0%';
-}
-
-// Auto-hide overlay
-function setupAutoHide() {
-  const overlay = document.querySelector('.slideshow-overlay');
-
-  slideshow.addEventListener('mousemove', resetAutoHide);
-  slideshow.addEventListener('touchstart', resetAutoHide);
-
-  function resetAutoHide() {
-    overlay.classList.remove('auto-hide');
-    clearTimeout(autoHideTimer);
-    autoHideTimer = setTimeout(() => {
-      if (slideshowPlaying) {
-        overlay.classList.add('auto-hide');
-      }
-    }, 3000);
-  }
-
-  resetAutoHide();
-}
