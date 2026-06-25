@@ -181,7 +181,7 @@ function renderGallery() {
     card.style.animationDelay = `${index * 0.05}s`;
 
     const img = document.createElement('img');
-    img.src = photo.url;
+    img.src = photo.thumb || photo.url; // Use thumbnail in gallery to save bandwidth
     img.alt = 'Photo';
     img.loading = 'lazy';
 
