@@ -45,7 +45,7 @@ function resetUploadForm() {
   submitBtn.disabled = true;
   progressBar.classList.remove('active');
   progressFill.style.width = '0%';
-  fileInput.value = '';
+  try { fileInput.value = ''; } catch(e) {}
 }
 
 // Drag and drop
@@ -65,13 +65,15 @@ dropZone.addEventListener('drop', (e) => {
   addFiles(files);
 });
 
-dropZone.addEventListener('click', () => {
+// Only open file picker if they didn't tap the label (label already handles it via for="fileInput")
+dropZone.addEventListener('click', (e) => {
+  if (e.target.closest('.file-label')) return;
   fileInput.click();
 });
 
 fileInput.addEventListener('change', (e) => {
-  const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
-  addFiles(files);
+  const files = Array.from(e.target.files);
+  if (files.length > 0) addFiles(files);
 });
 
 function addFiles(files) {

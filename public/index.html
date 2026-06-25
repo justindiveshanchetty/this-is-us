@@ -47,11 +47,11 @@
           </svg>
           <p>Drag & drop photos here</p>
           <span>or</span>
-          <label class="file-label">
+          <label class="file-label" for="fileInput">
             Browse Files
-            <input type="file" id="fileInput" multiple accept="image/*,.heic,.heif" hidden>
           </label>
         </div>
+        <input type="file" id="fileInput" multiple accept="image/*,.heic,.heif" style="position:absolute;left:-9999px;opacity:0;">
         <div class="preview-area" id="previewArea"></div>
         <button class="submit-btn" id="submitBtn" disabled>Upload</button>
         <div class="progress-bar" id="progressBar">
