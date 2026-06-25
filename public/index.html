@@ -45,13 +45,10 @@
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          <p>Drag & drop photos here</p>
-          <span>or</span>
-          <label class="file-label" for="fileInput">
-            Browse Files
-          </label>
+          <p>Tap to select photos</p>
+          <span class="file-label">Browse Files</span>
         </div>
-        <input type="file" id="fileInput" multiple accept="image/*,.heic,.heif" style="position:absolute;left:-9999px;opacity:0;">
+        <input type="file" id="fileInput" multiple accept="image/*" style="width:0;height:0;overflow:hidden;position:fixed;top:-1px;left:-1px;">
         <div class="preview-area" id="previewArea"></div>
         <button class="submit-btn" id="submitBtn" disabled>Upload</button>
         <div class="progress-bar" id="progressBar">

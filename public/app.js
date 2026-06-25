@@ -61,18 +61,19 @@ dropZone.addEventListener('dragleave', () => {
 dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
-  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+  const files = Array.from(e.dataTransfer.files);
   addFiles(files);
 });
 
-// Only open file picker if they didn't tap the label (label already handles it via for="fileInput")
+// Tap anywhere on drop zone to open file picker
 dropZone.addEventListener('click', (e) => {
-  if (e.target.closest('.file-label')) return;
+  e.preventDefault();
+  e.stopPropagation();
   fileInput.click();
 });
 
-fileInput.addEventListener('change', (e) => {
-  const files = Array.from(e.target.files);
+fileInput.addEventListener('change', () => {
+  const files = Array.from(fileInput.files);
   if (files.length > 0) addFiles(files);
 });
 
