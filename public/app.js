@@ -21,7 +21,8 @@ let selectedFiles = [];
 let photos = [];
 let currentPhotoIndex = 0;
 
-// Initialize — handled in slideshow section below
+// Initialize
+document.addEventListener('DOMContentLoaded', loadPhotos);
 
 // Modal controls
 uploadBtn.addEventListener('click', () => {
@@ -280,7 +281,7 @@ function showToast(message) {
 }
 
 // ──────────────────────────────────────
-// Live Slideshow
+// Slideshow
 // ──────────────────────────────────────
 
 const slideshow = document.getElementById('slideshow');
@@ -292,159 +293,39 @@ const slideshowPlayPause = document.getElementById('slideshowPlayPause');
 const slideshowPrevBtn = document.getElementById('slideshowPrev');
 const slideshowNextBtn = document.getElementById('slideshowNext');
 const slideshowCounter = document.getElementById('slideshowCounter');
-const slideshowViewers = document.getElementById('slideshowViewers');
-const viewerCount = document.getElementById('viewerCount');
 const speedSlider = document.getElementById('speedSlider');
 const speedLabel = document.getElementById('speedLabel');
-const slideshowShare = document.getElementById('slideshowShare');
 const slideshowProgressFill = document.getElementById('slideshowProgressFill');
 
-let slideshowSessionId = null;
-let slideshowEventSource = null;
+let slideshowIndex = 0;
 let slideshowPlaying = false;
-let slideshowCurrentImg = 1; // Which img element is currently visible
-let progressAnimation = null;
+let slideshowTimer = null;
+let slideshowCurrentImg = 1;
 let autoHideTimer = null;
 
-// Check URL for shared slideshow
-function checkForSharedSlideshow() {
-  const params = new URLSearchParams(window.location.search);
-  const sessionId = params.get('slideshow');
-  if (sessionId) {
-    joinSlideshow(sessionId);
-  }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  loadPhotos();
-  checkForSharedSlideshow();
-});
-
-// Start a new slideshow
-slideshowBtn.addEventListener('click', async () => {
+// Start slideshow
+slideshowBtn.addEventListener('click', () => {
   if (photos.length === 0) {
     showToast('Upload some photos first!');
     return;
   }
-
-  try {
-    const speed = speedSlider.value * 1000;
-    const response = await fetch('/api/slideshow', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed })
-    });
-    const data = await response.json();
-
-    if (data.error) {
-      showToast(data.error);
-      return;
-    }
-
-    slideshowSessionId = data.id;
-    connectToSlideshow(data.id);
-    openSlideshow();
-  } catch (err) {
-    showToast('Failed to start slideshow');
-  }
+  openSlideshow();
 });
 
-// Join an existing slideshow
-async function joinSlideshow(sessionId) {
-  try {
-    const response = await fetch(`/api/slideshow/${sessionId}`);
-    if (!response.ok) {
-      showToast('Slideshow not found or ended');
-      // Clean URL
-      window.history.replaceState({}, '', window.location.pathname);
-      return;
-    }
-
-    slideshowSessionId = sessionId;
-    connectToSlideshow(sessionId);
-    openSlideshow();
-  } catch (err) {
-    showToast('Failed to join slideshow');
-  }
-}
-
-// Connect to the live SSE stream
-function connectToSlideshow(sessionId) {
-  if (slideshowEventSource) {
-    slideshowEventSource.close();
-  }
-
-  slideshowEventSource = new EventSource(`/api/slideshow/${sessionId}/live`);
-
-  slideshowEventSource.addEventListener('message', (event) => {
-    const data = JSON.parse(event.data);
-
-    switch (data.type) {
-      case 'sync':
-      case 'update':
-        updateSlideshowDisplay(data);
-        break;
-      case 'viewers':
-        viewerCount.textContent = data.viewers;
-        break;
-      case 'ended':
-        showToast('Slideshow ended');
-        closeSlideshow();
-        break;
-    }
-  });
-
-  slideshowEventSource.addEventListener('error', () => {
-    // Will auto-reconnect
-  });
-}
-
-function updateSlideshowDisplay(data) {
-  const { photo, currentIndex, playing, speed, totalPhotos, viewers } = data;
-
-  // Crossfade between two img elements
-  const activeImg = slideshowCurrentImg === 1 ? slideshowImg1 : slideshowImg2;
-  const inactiveImg = slideshowCurrentImg === 1 ? slideshowImg2 : slideshowImg1;
-
-  inactiveImg.src = photo.url;
-  // Small delay for the src to load before transitioning
-  inactiveImg.onload = () => {
-    activeImg.classList.remove('slideshow-img-active');
-    inactiveImg.classList.add('slideshow-img-active');
-    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
-  };
-  // Fallback if already cached
-  if (inactiveImg.complete && inactiveImg.src.includes(photo.url)) {
-    activeImg.classList.remove('slideshow-img-active');
-    inactiveImg.classList.add('slideshow-img-active');
-    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
-  }
-
-  slideshowCounter.textContent = `${currentIndex + 1} / ${totalPhotos || photos.length}`;
-
-  if (viewers !== undefined) {
-    viewerCount.textContent = viewers;
-  }
-
-  slideshowPlaying = playing;
-  if (playing) {
-    slideshow.classList.add('playing');
-    startProgressBar(speed);
-  } else {
-    slideshow.classList.remove('playing');
-    stopProgressBar();
-  }
-
-  if (speed) {
-    const seconds = Math.round(speed / 1000);
-    speedSlider.value = seconds;
-    speedLabel.textContent = seconds + 's';
-  }
-}
-
 function openSlideshow() {
+  slideshowIndex = 0;
   slideshow.classList.add('active');
   document.body.style.overflow = 'hidden';
+
+  // Show first photo
+  slideshowImg1.src = photos[0].url;
+  slideshowImg1.classList.add('slideshow-img-active');
+  slideshowImg2.classList.remove('slideshow-img-active');
+  slideshowCurrentImg = 1;
+  updateCounter();
+
+  // Auto-play
+  startPlaying();
   setupAutoHide();
 }
 
@@ -452,103 +333,115 @@ function closeSlideshow() {
   slideshow.classList.remove('active');
   slideshow.classList.remove('playing');
   document.body.style.overflow = '';
+  stopPlaying();
+  clearTimeout(autoHideTimer);
+}
 
-  if (slideshowEventSource) {
-    slideshowEventSource.close();
-    slideshowEventSource = null;
+function startPlaying() {
+  slideshowPlaying = true;
+  slideshow.classList.add('playing');
+  resetTimer();
+}
+
+function stopPlaying() {
+  slideshowPlaying = false;
+  slideshow.classList.remove('playing');
+  clearInterval(slideshowTimer);
+  slideshowTimer = null;
+  stopProgressBar();
+}
+
+function resetTimer() {
+  clearInterval(slideshowTimer);
+  const speed = speedSlider.value * 1000;
+  startProgressBar(speed);
+  slideshowTimer = setInterval(() => {
+    goToNext();
+  }, speed);
+}
+
+function goToNext() {
+  slideshowIndex = (slideshowIndex + 1) % photos.length;
+  showCurrentPhoto();
+  if (slideshowPlaying) {
+    const speed = speedSlider.value * 1000;
+    startProgressBar(speed);
+  }
+}
+
+function goToPrev() {
+  slideshowIndex = (slideshowIndex - 1 + photos.length) % photos.length;
+  showCurrentPhoto();
+  if (slideshowPlaying) {
+    resetTimer();
+  }
+}
+
+function showCurrentPhoto() {
+  const photo = photos[slideshowIndex];
+  const activeImg = slideshowCurrentImg === 1 ? slideshowImg1 : slideshowImg2;
+  const inactiveImg = slideshowCurrentImg === 1 ? slideshowImg2 : slideshowImg1;
+
+  inactiveImg.src = photo.url;
+  inactiveImg.onload = () => {
+    activeImg.classList.remove('slideshow-img-active');
+    inactiveImg.classList.add('slideshow-img-active');
+    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
+  };
+  // If already cached
+  if (inactiveImg.complete) {
+    activeImg.classList.remove('slideshow-img-active');
+    inactiveImg.classList.add('slideshow-img-active');
+    slideshowCurrentImg = slideshowCurrentImg === 1 ? 2 : 1;
   }
 
-  stopProgressBar();
-  clearTimeout(autoHideTimer);
+  updateCounter();
+}
 
-  // Clean URL
-  window.history.replaceState({}, '', window.location.pathname);
-  slideshowSessionId = null;
+function updateCounter() {
+  slideshowCounter.textContent = `${slideshowIndex + 1} / ${photos.length}`;
 }
 
 // Controls
-slideshowExit.addEventListener('click', async () => {
-  if (slideshowSessionId) {
-    try {
-      await fetch(`/api/slideshow/${slideshowSessionId}`, { method: 'DELETE' });
-    } catch (e) { /* ignore */ }
-  }
-  closeSlideshow();
-});
+slideshowExit.addEventListener('click', closeSlideshow);
 
 slideshowPlayPause.addEventListener('click', () => {
-  if (!slideshowSessionId) return;
-  const action = slideshowPlaying ? 'pause' : 'play';
-  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action })
-  });
+  if (slideshowPlaying) {
+    stopPlaying();
+  } else {
+    startPlaying();
+  }
 });
 
-slideshowPrevBtn.addEventListener('click', () => {
-  if (!slideshowSessionId) return;
-  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'prev' })
-  });
-});
-
-slideshowNextBtn.addEventListener('click', () => {
-  if (!slideshowSessionId) return;
-  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'next' })
-  });
-});
+slideshowPrevBtn.addEventListener('click', goToPrev);
+slideshowNextBtn.addEventListener('click', goToNext);
 
 speedSlider.addEventListener('input', () => {
   speedLabel.textContent = speedSlider.value + 's';
 });
 
 speedSlider.addEventListener('change', () => {
-  if (!slideshowSessionId) return;
-  const speed = speedSlider.value * 1000;
-  fetch(`/api/slideshow/${slideshowSessionId}/control`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'speed', speed })
-  });
-});
-
-slideshowShare.addEventListener('click', () => {
-  if (!slideshowSessionId) return;
-  const url = `${window.location.origin}?slideshow=${slideshowSessionId}`;
-  navigator.clipboard.writeText(url).then(() => {
-    showToast('Link copied! Share it so others can watch live.');
-    // Also update URL
-    window.history.replaceState({}, '', `?slideshow=${slideshowSessionId}`);
-  }).catch(() => {
-    // Fallback
-    prompt('Share this link:', url);
-  });
+  if (slideshowPlaying) {
+    resetTimer();
+  }
 });
 
 // Keyboard controls in slideshow
 document.addEventListener('keydown', (e) => {
   if (!slideshow.classList.contains('active')) return;
-  if (e.key === 'Escape') { slideshowExit.click(); e.preventDefault(); }
-  if (e.key === 'ArrowLeft') slideshowPrevBtn.click();
-  if (e.key === 'ArrowRight') slideshowNextBtn.click();
+  if (e.key === 'Escape') { closeSlideshow(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') goToPrev();
+  if (e.key === 'ArrowRight') goToNext();
   if (e.key === ' ') { slideshowPlayPause.click(); e.preventDefault(); }
 });
 
-// Progress bar animation
+// Progress bar
 function startProgressBar(duration) {
   stopProgressBar();
   slideshowProgressFill.style.transition = 'none';
   slideshowProgressFill.style.width = '0%';
-
   // Force reflow
   slideshowProgressFill.offsetHeight;
-
   slideshowProgressFill.style.transition = `width ${duration}ms linear`;
   slideshowProgressFill.style.width = '100%';
 }
@@ -558,7 +451,7 @@ function stopProgressBar() {
   slideshowProgressFill.style.width = '0%';
 }
 
-// Auto-hide overlay after inactivity
+// Auto-hide overlay
 function setupAutoHide() {
   const overlay = document.querySelector('.slideshow-overlay');
 
