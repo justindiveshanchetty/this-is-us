@@ -61,7 +61,7 @@ dropZone.addEventListener('dragleave', () => {
 dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
-  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
   addFiles(files);
 });
 
@@ -70,7 +70,7 @@ dropZone.addEventListener('click', () => {
 });
 
 fileInput.addEventListener('change', (e) => {
-  const files = Array.from(e.target.files);
+  const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
   addFiles(files);
 });
 
