@@ -599,14 +599,6 @@ body {
   font-weight: 500;
 }
 
-.slideshow-viewers {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: rgba(255,255,255,0.6);
-  font-size: 0.85rem;
-}
-
 .slideshow-exit {
   background: rgba(255,255,255,0.1);
   border: none;
@@ -671,7 +663,7 @@ body {
 .slideshow-bottom-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 20px 24px;
   background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
 }
@@ -688,24 +680,6 @@ body {
   width: 100px;
   accent-color: var(--primary);
   cursor: pointer;
-}
-
-.slideshow-share-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: var(--radius-sm);
-  color: white;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.slideshow-share-btn:hover {
-  background: rgba(255,255,255,0.2);
 }
 
 .slideshow-progress {
