@@ -11,9 +11,10 @@ const PORT = process.env.PORT || 3000;
 // Gzip all responses to save bandwidth
 app.use(compression());
 
-// Ensure directories exist
-const uploadsDir = path.join(__dirname, 'uploads');
-const thumbsDir = path.join(__dirname, 'uploads', 'thumbs');
+// Ensure directories exist — use RAILWAY_VOLUME_MOUNT_PATH if available
+const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
+const uploadsDir = path.join(dataDir, 'uploads');
+const thumbsDir = path.join(dataDir, 'uploads', 'thumbs');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 if (!fs.existsSync(thumbsDir)) fs.mkdirSync(thumbsDir, { recursive: true });
 
